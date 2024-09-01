@@ -1,0 +1,77 @@
+name: Daily Release
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # Run daily at midnight UTC
+  workflow_dispatch: # Allow manual triggering
+
+permissions:
+  contents: write
+
+jobs:
+  create_release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Generate version number
+        id: version
+        run: |
+          # Get the latest tag
+          git fetch --tags
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.0.0")
+
+          # Extract major, minor, and patch versions
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${LATEST_TAG#v}"
+
+          # Generate a random number between 1 and 100
+          RANDOM_NUM=$((RANDOM % 100 + 1))
+
+          # Update version based on probabilities
+          if [ $RANDOM_NUM -le 10 ]; then
+            # 10% chance: Update major version
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          elif [ $RANDOM_NUM -le 40 ]; then
+            # 30% chance: Update patch version
+            PATCH=$((PATCH + 1))
+          else
+            # 60% chance: Update minor version
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          fi
+
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Create dummy file
+        run: echo "This is a dummy file for release ${{ steps.version.outputs.version }}" > release_${{ steps.date.outputs.date }}.txt
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          release_name: Release ${{ steps.version.outputs.version }}
+          body: |
+            Automated release created on ${{ steps.date.outputs.date }}
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./release_${{ steps.date.outputs.date }}.txt
+          asset_name: release_${{ steps.date.outputs.date }}.txt
+          asset_content_type: text/plain
